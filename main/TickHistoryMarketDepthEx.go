@@ -16,7 +16,13 @@ import (
 	"time"
 )
 
-func HttpGet(client *http.Client, url string, token *string, trace bool) (*http.Response, error) {
+//Enter usrname and password here
+var dssUserName = ""
+var dssPassword = ""
+var trthURL = "https://hosted.datascopeapi.reuters.com/RestApi/v1/"
+
+//HTTPGet : The function that wraps HTTP GET request. It adds the authorization token if token isn't nil
+func HTTPGet(client *http.Client, url string, token *string, trace bool) (*http.Response, error) {
 	req, _ := http.NewRequest("GET", url, nil)
 
 	req.Header.Add("Content-Type", "application/json")
@@ -45,9 +51,11 @@ func HttpGet(client *http.Client, url string, token *string, trace bool) (*http.
 	return resp, err
 
 }
+
+//PrintDownloadPercent : This function shows the download progress
 func PrintDownloadPercent(done chan int64, path string, total int64) {
 
-	var stop bool = false
+	var stop = false
 
 	for {
 		select {
@@ -85,10 +93,11 @@ func PrintDownloadPercent(done chan int64, path string, total int64) {
 		time.Sleep(time.Second * 5)
 	}
 }
-func HttpPost(client *http.Client, url string, token *string, body *bytes.Buffer, trace bool) (*http.Response, error) {
-	//req, err := http.NewRequest("POST", trthURL+"Authentication/RequestToken", bytes.NewBuffer(b))
+
+//HTTPPost : The function that wraps HTTP POST request. It adds the authorization token if token isn't nil
+func HTTPPost(client *http.Client, url string, token *string, body *bytes.Buffer, trace bool) (*http.Response, error) {
+
 	req, _ := http.NewRequest("POST", url, body)
-	//req, err := http.NewRequest("POST", trthURL+"Authentication/RequestToken", bytes.NewBuffer(jsonStr))
 
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Prefer", "respond-async")
@@ -117,7 +126,7 @@ func HttpPost(client *http.Client, url string, token *string, body *bytes.Buffer
 	return resp, err
 }
 func main() {
-	trthURL := "https://hosted.datascopeapi.reuters.com/RestApi/v1/"
+
 	//var jsonStr = []byte(`{"Credentials":{"Username":"9008895", "Password":"Reuters123"}}`)
 	request := new(trthrest.TickHistoryMarketDepthExtractionRequest)
 
@@ -210,15 +219,24 @@ func main() {
 		}
 	*/
 	//b, err := json.Marshal(message)
+
+	if dssUserName == "" {
+		fmt.Print("Enter DSS Username: ")
+		fmt.Scanln(&dssUserName)
+	}
+	if dssPassword == "" {
+		fmt.Print("Enter DSS Password: ")
+		fmt.Scanln(&dssPassword)
+	}
 	b, err := json.Marshal(struct {
 		Credentials trthrest.Credential
 	}{
 		Credentials: trthrest.Credential{
-			"9008895",
-			"Reuters123",
+			Username: dssUserName,
+			Password: dssPassword,
 		},
 	})
-	resp, err := HttpPost(client, trthURL+"Authentication/RequestToken", nil, bytes.NewBuffer(b), false)
+	resp, err := HTTPPost(client, trthURL+"Authentication/RequestToken", nil, bytes.NewBuffer(b), true)
 
 	if err != nil {
 		log.Printf("Error: %s\n", err.Error())
@@ -253,7 +271,7 @@ func main() {
 		ExtractionRequest: request,
 	})
 
-	resp, err = HttpPost(client, trthURL+"Extractions/ExtractRaw", &token, bytes.NewBuffer(req1), true)
+	resp, err = HTTPPost(client, trthURL+"Extractions/ExtractRaw", &token, bytes.NewBuffer(req1), true)
 
 	if err != nil {
 		log.Fatal(err)
@@ -263,7 +281,7 @@ func main() {
 		time.Sleep(3000 * time.Millisecond)
 		location := resp.Header.Get("Location")
 		location = strings.Replace(location, "http:", "https:", 1)
-		resp, err = HttpGet(client, location, &token, true)
+		resp, err = HTTPGet(client, location, &token, true)
 	}
 
 	body, err = ioutil.ReadAll(resp.Body)
@@ -286,7 +304,7 @@ func main() {
 
 	jobIDURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
-	resp, err = HttpGet(client, jobIDURL, &token, true)
+	resp, err = HTTPGet(client, jobIDURL, &token, true)
 
 	if err != nil {
 		log.Fatal(err)
