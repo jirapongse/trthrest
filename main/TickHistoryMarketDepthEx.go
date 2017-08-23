@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"thomsonreuters/trthrest"
+	"github.com/jirapongse/trthrest"
 	"time"
 )
 
@@ -93,6 +93,13 @@ func PrintDownloadPercent(done chan int64, path string, total int64) {
 
 		time.Sleep(time.Second * 5)
 	}
+}
+
+func GetExtractionIDFromNote(note string) (string){
+	extractionIDReg := regexp.MustCompile("Extraction ID: ([0-9]+)")
+	IDReg := regexp.MustCompile("[0-9]+")
+	return IDReg.FindString(extractionIDReg.FindString(note))
+
 }
 
 //HTTPPost : The function that wraps HTTP POST request. It adds the authorization token if token isn't nil
@@ -301,10 +308,48 @@ func main() {
 	fmt.Println(extractRawResult.Metadata)
 	fmt.Println(extractRawResult.JobID)
 	fmt.Println(extractRawResult.Notes)
-	note := extractRawResult.Notes[0]
+	//note := extractRawResult.Notes[0]
 	resp.Body.Close()
-	re := regexp.MustCompile("Extraction ID: ([0-9]+)")
-	fmt.Printf("**************\n%q\n**************\n", re.FindString(note))
+	extractionID := GetExtractionIDFromNote(extractRawResult.Notes[0])
+	fmt.Printf("**************\nExtractionID: %q\n**************\n", extractionID)
+	if(extractionID == ""){
+		log.Fatal("ExtractionID is nil")
+	}
+
+	reportExtractionURL := trthURL + "Extractions/ReportExtractions('"+extractionID+"')/FullFile"
+	resp, err = HTTPGet(client, reportExtractionURL, &token, true)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	body, err = ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+	
+		log.Fatalf("Status Code: %s\n%s ", resp.Status, string(body))
+	}
+	extractedFile := &trthrest.ExtractedFile{}
+	err = json.Unmarshal(body, extractedFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(extractedFile.Metadata)
+	fmt.Println(extractedFile.ReportExtractionId)
+	fmt.Println(extractedFile.ExtractedFileId)
+	fmt.Println(extractedFile.ScheduleId)	
+	fmt.Println(extractedFile.ExtractedFileName)
+	fmt.Println(extractedFile.Size)
+	fmt.Println(extractedFile.FileType)
+	fmt.Println(extractedFile.LastWriteTimeUtc.String())
+	//fmt.Println(extractedFile.ReceivedDateUtc.String())
+
+	
+	//extractionIDReg := regexp.MustCompile("Extraction ID: ([0-9]+)")
+	//IDReg := regexp.MustCompile("[0-9]+")
+	//fmt.Printf("**************\n%q\n**************\n", IDReg.FindString(extractionIDReg.FindString(note)))
 	jobIDURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
 	resp, err = HTTPGet(client, jobIDURL, &token, true)
@@ -313,7 +358,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//fmt.Println(string(body))
+
 	if resp.StatusCode != 200 {
 		body, _ = ioutil.ReadAll(resp.Body)
 		log.Fatalf("Status Code: %s\n%s ", resp.Status, string(body))
@@ -326,8 +371,8 @@ func main() {
 	}
 
 	done := make(chan int64)
-	outputFileName := "output_" + strconv.Itoa(os.Getpid()) + ".csv.gz"
-
+	//outputFileName := "output_" + strconv.Itoa(os.Getpid()) + ".csv.gz"
+	outputFileName := extractedFile.ExtractedFileName
 	out, err := os.Create(outputFileName)
 	if err != nil {
 		log.Fatal(err)
