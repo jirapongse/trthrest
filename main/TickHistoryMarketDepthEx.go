@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"thomsonreuters/trthrest"
@@ -300,8 +301,10 @@ func main() {
 	fmt.Println(extractRawResult.Metadata)
 	fmt.Println(extractRawResult.JobID)
 	fmt.Println(extractRawResult.Notes)
+	note := extractRawResult.Notes[0]
 	resp.Body.Close()
-
+	re := regexp.MustCompile("Extraction ID: ([0-9]+)")
+	fmt.Printf("**************\n%q\n**************\n", re.FindString(note))
 	jobIDURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
 	resp, err = HTTPGet(client, jobIDURL, &token, true)
