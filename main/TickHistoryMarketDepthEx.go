@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -260,8 +261,17 @@ func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[s
 func main() {
 
 	var concurrentDownload = true
-	const NumOfDownloadConnections = 2
+	var NumOfDownloadConnections int
 	var headers map[string]string
+
+	directDownloadFlag := flag.Bool("X", false, "Download from AWS (false)")
+	numOfConnection := flag.Int("c", 1, "Number of concurent download channels")
+	flag.Parse()
+	NumOfDownloadConnections = *numOfConnection
+
+	if *directDownloadFlag == true {
+		fmt.Printf("X-Direct-Download Flag: true \n")
+	}
 
 	//var jsonStr = []byte(`{"Credentials":{"Username":"9008895", "Password":"Reuters123"}}`)
 	request := new(trthrest.TickHistoryMarketDepthExtractionRequest)
@@ -348,7 +358,12 @@ func main() {
 	tr := &http.Transport{
 		DisableCompression: true,
 	}
-	client := &http.Client{Transport: tr}
+	client := &http.Client{
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	/*
 		message := &RequestTokenMsg{
@@ -484,14 +499,34 @@ func main() {
 	//extractionIDReg := regexp.MustCompile("Extraction ID: ([0-9]+)")
 	//IDReg := regexp.MustCompile("[0-9]+")
 	//fmt.Printf("**************\n%q\n**************\n", IDReg.FindString(extractionIDReg.FindString(note)))
-	jobIDURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
+	downloadURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
-
 	start := time.Now()
+	if *directDownloadFlag == true {
+		newHeaders := make(map[string]string)
+		for k, v := range headers {
+			newHeaders[k] = v
+		}
+		newHeaders["X-Direct-Download"] = "true"
+		resp, err = HTTPGet(client, downloadURL, newHeaders, true)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if resp.StatusCode == 302 {
+			downloadURL = resp.Header.Get("Location")
+			for k := range headers {
+				delete(headers, k)
+			}
+		} else {
+			delete(headers, "X-Direct-Download")
+		}
+
+	}
+
 	if concurrentDownload == true {
-		ConcurrentDownload(client, headers, jobIDURL, extractedFile.ExtractedFileName, NumOfDownloadConnections, extractedFile.Size)
+		ConcurrentDownload(client, headers, downloadURL, extractedFile.ExtractedFileName, NumOfDownloadConnections, extractedFile.Size)
 	} else {
-		DownloadFile(client, headers, jobIDURL, extractedFile.ExtractedFileName, -1, -1)
+		DownloadFile(client, headers, downloadURL, extractedFile.ExtractedFileName, -1, -1)
 	}
 	elapsed := time.Since(start)
 	log.Printf("Download Time: %s\n", elapsed)
