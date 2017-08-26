@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	"github.com/howeyc/gopass"
 	"github.com/jirapongse/trthrest"
 )
 
@@ -37,7 +37,7 @@ func HTTPGet(client *http.Client, url string, headers map[string]string, trace b
 
 	*/
 	for key, value := range headers {
-		fmt.Printf("%s: %s\n", key, value)
+		//fmt.Printf("%s: %s\n", key, value)
 		req.Header.Add(key, value)
 	}
 
@@ -129,7 +129,7 @@ func MergeFile(numberOfParts int, outFileName string) {
 	destFile.Close()
 }
 
-func DownloadFile(client *http.Client, headers map[string]string, url string, outFileName string, start int64, stop int64) {
+func DownloadFile(client *http.Client, headers map[string]string, url string, outFileName string, start int64, stop int64, tracing bool) {
 
 	log.Printf("Download File: %s, %d, %d\n", outFileName, start, stop)
 	var newHeaders map[string]string
@@ -147,7 +147,7 @@ func DownloadFile(client *http.Client, headers map[string]string, url string, ou
 		}
 
 	}
-	resp, err := HTTPGet(client, url, newHeaders, true)
+	resp, err := HTTPGet(client, url, newHeaders, tracing)
 
 	if err != nil {
 		log.Fatal(err)
@@ -184,28 +184,29 @@ func DownloadFile(client *http.Client, headers map[string]string, url string, ou
 	log.Println(outFileName + ": Download Completed!")
 }
 
-func ConcurrentDownload(client *http.Client, headers map[string]string, url string, outFileName string, numOfConn int, fileSize int64) {
+func ConcurrentDownload(client *http.Client, headers map[string]string, url string, outFileName string, numOfConn int, fileSize int64,  tracing bool) {
 	var partSize, fileOffset int64
 	partSize = fileSize / int64(numOfConn)
 	fileOffset = 0
 
+	log.Printf("ConcurrentDownload: %s, conn=%d\n", outFileName, numOfConn);
 	var wg sync.WaitGroup
 
 	for i := 1; i <= numOfConn; i++ {
 		wg.Add(1)
 		if i == numOfConn {
-			fmt.Printf("Part %d: %d- \n", i, fileOffset)
+			log.Printf("Part %d: %d- \n", i, fileOffset)
 
 			go func(filename string, start int64, stop int64) {
 				defer wg.Done()
-				DownloadFile(client, headers, url, filename, start, stop)
+				DownloadFile(client, headers, url, filename, start, stop, tracing)
 			}(fmt.Sprintf("part%d", i), fileOffset, -1)
 		} else {
-			fmt.Printf("Part %d: %d - %d\n", i, fileOffset, fileOffset+partSize-1)
+			log.Printf("Part %d: %d - %d\n", i, fileOffset, fileOffset+partSize-1)
 
 			go func(filename string, start int64, stop int64) {
 				defer wg.Done()
-				DownloadFile(client, headers, url, filename, start, stop)
+				DownloadFile(client, headers, url, filename, start, stop, tracing)
 			}(fmt.Sprintf("part%d", i), fileOffset, fileOffset+partSize-1)
 			fileOffset = fileOffset + partSize
 		}
@@ -234,7 +235,7 @@ func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[s
 	*/
 
 	for key, value := range headers {
-		fmt.Printf("%s: %s\n", key, value)
+		//fmt.Printf("%s: %s\n", key, value)
 		req.Header.Add(key, value)
 	}
 	if trace == true {
@@ -260,18 +261,29 @@ func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[s
 }
 func main() {
 
-	var concurrentDownload = true
+	//var concurrentDownload = true
 	var NumOfDownloadConnections int
 	var headers map[string]string
 
-	directDownloadFlag := flag.Bool("X", false, "Download from AWS (false)")
-	numOfConnection := flag.Int("c", 1, "Number of concurent download channels")
+	directDownloadFlag := flag.Bool("aws", false, "Download from AWS (false)")
+	numOfConnection := flag.Int("n", 1, "Number of concurent download channels")
+	traceFlag := flag.Bool("X", false, "Enable HTTP tracing (false)")
 	flag.Parse()
 	NumOfDownloadConnections = *numOfConnection
+	
 
 	if *directDownloadFlag == true {
-		fmt.Printf("X-Direct-Download Flag: true \n")
+		log.Printf("X-Direct-Download Flag: true \n")
 	}
+	if *traceFlag == true {
+		log.Printf("tracing Flag: true \n")
+	}
+	log.Printf("Number of concurent download: %d\n", NumOfDownloadConnections)
+	/*
+	if NumOfDownloadConnections == 1{
+		concurrentDownload = false
+		fmt.Printf("Concurent Download is false\n")
+	}*/
 
 	//var jsonStr = []byte(`{"Credentials":{"Username":"9008895", "Password":"Reuters123"}}`)
 	request := new(trthrest.TickHistoryMarketDepthExtractionRequest)
@@ -286,7 +298,7 @@ func main() {
 	request.Condition.MessageTimeStampIn = trthrest.TimeOptionsGmtUtcEnum
 	request.Condition.DisplaySourceRIC = true
 	request.Condition.ReportDateRangeType = trthrest.ReportDateRangeTypeRangeEnum
-	startdate := time.Date(2017, 7, 1, 0, 0, 0, 0, time.UTC)
+	startdate := time.Date(2017, 8, 1, 0, 0, 0, 0, time.UTC)
 	request.Condition.QueryStartDate = &startdate
 	enddate := time.Date(2017, 8, 23, 0, 0, 0, 0, time.UTC)
 	request.Condition.QueryEndDate = &enddate
@@ -381,7 +393,9 @@ func main() {
 	}
 	if dssPassword == "" {
 		fmt.Print("Enter DSS Password: ")
-		fmt.Scanln(&dssPassword)
+		b, _ := gopass.GetPasswdMasked()
+		dssPassword = string(b)
+		//fmt.Scanln(&dssPassword)
 	}
 	b, err := json.Marshal(struct {
 		Credentials trthrest.Credential
@@ -391,7 +405,7 @@ func main() {
 			Password: dssPassword,
 		},
 	})
-	resp, err := HTTPPost(client, trthURL+"Authentication/RequestToken", bytes.NewBuffer(b), headers, true)
+	resp, err := HTTPPost(client, trthURL+"Authentication/RequestToken", bytes.NewBuffer(b), headers, *traceFlag)
 
 	if err != nil {
 		log.Printf("Error: %s\n", err.Error())
@@ -416,8 +430,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Context: %s\n", respMsg.Metadata)
-	fmt.Printf("Token: %s\n", respMsg.Value)
+	//fmt.Printf("Context: %s\n", respMsg.Metadata)
+	//fmt.Printf("Token: %s\n", respMsg.Value)
 	token := respMsg.Value
 	headers["Authorization"] = "Token " + token
 
@@ -427,7 +441,7 @@ func main() {
 		ExtractionRequest: request,
 	})
 
-	resp, err = HTTPPost(client, trthURL+"Extractions/ExtractRaw", bytes.NewBuffer(req1), headers, true)
+	resp, err = HTTPPost(client, trthURL+"Extractions/ExtractRaw", bytes.NewBuffer(req1), headers, *traceFlag)
 
 	if err != nil {
 		log.Fatal(err)
@@ -437,7 +451,7 @@ func main() {
 		time.Sleep(3000 * time.Millisecond)
 		location := resp.Header.Get("Location")
 		location = strings.Replace(location, "http:", "https:", 1)
-		resp, err = HTTPGet(client, location, headers, true)
+		resp, err = HTTPGet(client, location, headers, *traceFlag)
 	}
 
 	body, err = ioutil.ReadAll(resp.Body)
@@ -453,9 +467,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(extractRawResult.Metadata)
-	fmt.Println(extractRawResult.JobID)
-	fmt.Println(extractRawResult.Notes)
+	//fmt.Println(extractRawResult.Metadata)
+	//fmt.Println(extractRawResult.JobID)
+	//fmt.Println(extractRawResult.Notes)
 	//note := extractRawResult.Notes[0]
 	resp.Body.Close()
 	extractionID := GetExtractionIDFromNote(extractRawResult.Notes[0])
@@ -463,11 +477,12 @@ func main() {
 	fmt.Printf("**************\nExtractionID: %q\n**************\n", extractionID)
 	if extractionID == "" {
 		log.Println("ExtractionID is nil: Disable Concorrent Download")
-		concurrentDownload = false
+		NumOfDownloadConnections = 1
+		//concurrentDownload = false
 	}
 
 	reportExtractionURL := trthURL + "Extractions/ReportExtractions('" + extractionID + "')/FullFile"
-	resp, err = HTTPGet(client, reportExtractionURL, headers, true)
+	resp, err = HTTPGet(client, reportExtractionURL, headers, *traceFlag)
 
 	if err != nil {
 		log.Fatal(err)
@@ -486,14 +501,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(extractedFile.Metadata)
-	fmt.Println(extractedFile.ReportExtractionId)
-	fmt.Println(extractedFile.ExtractedFileId)
-	fmt.Println(extractedFile.ScheduleId)
-	fmt.Println(extractedFile.ExtractedFileName)
-	fmt.Println(extractedFile.Size)
-	fmt.Println(extractedFile.FileType)
-	fmt.Println(extractedFile.LastWriteTimeUtc.String())
+	//fmt.Println(extractedFile.Metadata)
+	//fmt.Println(extractedFile.ReportExtractionId)
+	//fmt.Println(extractedFile.ExtractedFileId)
+	//fmt.Println(extractedFile.ScheduleId)
+	//fmt.Println(extractedFile.ExtractedFileName)
+	//fmt.Println(extractedFile.Size)
+	//fmt.Println(extractedFile.FileType)
+	//fmt.Println(extractedFile.LastWriteTimeUtc.String())
 	//fmt.Println(extractedFile.ReceivedDateUtc.String())
 
 	//extractionIDReg := regexp.MustCompile("Extraction ID: ([0-9]+)")
@@ -503,30 +518,34 @@ func main() {
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
 	start := time.Now()
 	if *directDownloadFlag == true {
+
+		//Clone the TRTH headers to newHeaders and then add X-Direct-Download to the new header
 		newHeaders := make(map[string]string)
 		for k, v := range headers {
 			newHeaders[k] = v
 		}
 		newHeaders["X-Direct-Download"] = "true"
-		resp, err = HTTPGet(client, downloadURL, newHeaders, true)
+		resp, err = HTTPGet(client, downloadURL, newHeaders, *traceFlag)
 		if err != nil {
 			log.Fatal(err)
 		}
 		if resp.StatusCode == 302 {
+			//GET AWS URL used to download a file and change the URL in downloadURL variable
 			downloadURL = resp.Header.Get("Location")
+			//Clear all headers before sending GET request to AWS. Otherwise, it will return an error
 			for k := range headers {
 				delete(headers, k)
 			}
-		} else {
-			delete(headers, "X-Direct-Download")
-		}
+		} 
 
 	}
 
-	if concurrentDownload == true {
-		ConcurrentDownload(client, headers, downloadURL, extractedFile.ExtractedFileName, NumOfDownloadConnections, extractedFile.Size)
+	if NumOfDownloadConnections > 1 {
+		//if we get the filename and filesize from Extractions/ReportExtractions, it will use the concurrent download
+		ConcurrentDownload(client, headers, downloadURL, extractedFile.ExtractedFileName, NumOfDownloadConnections, extractedFile.Size, *traceFlag)
 	} else {
-		DownloadFile(client, headers, downloadURL, extractedFile.ExtractedFileName, -1, -1)
+		//if we can't get the filename and filesize from Extractions/ReportExtractions, it will download with one connection
+		DownloadFile(client, headers, downloadURL, extractedFile.ExtractedFileName, -1, -1, *traceFlag)
 	}
 	elapsed := time.Since(start)
 	log.Printf("Download Time: %s\n", elapsed)
