@@ -244,6 +244,7 @@ func PrintDownloadPercent(done chan int64, path string, total int64) {
 
 //MergeFile: Merge part1, part2, part3, ... files
 func MergeFile(numberOfParts int, outFileName string) {
+	log.Printf("Merging Files: %s\n", outFileName)
 	b := make([]byte, 5000)
 	destFile, _ := os.Create(outFileName)
 	writer := bufio.NewWriter(destFile)
