@@ -56,7 +56,8 @@ func main() {
 	var headers map[string]string
 	var outputFilename string
 	var fileSize int64
-
+	var step = 0
+	
 	directDownloadFlag := flag.Bool("aws", false, "Download from AWS (false)")
 	numOfConnection := flag.Int("n", 1, "Number of concurent download channels")
 	traceFlag := flag.Bool("X", false, "Enable HTTP tracing (false)")
@@ -68,12 +69,12 @@ func main() {
 	dssPassword = *password
 
 	if *directDownloadFlag == true {
-		log.Printf("X-Direct-Download Flag: true \n")
+		log.Printf("X-Direct-Download: true \n")
 	}
 	if *traceFlag == true {
-		log.Printf("tracing Flag: true \n")
+		log.Printf("Tracing: true \n")
 	}
-	log.Printf("Number of concurent download: %d\n", *numOfConnection)
+	log.Printf("Number of concurrent download: %d\n", *numOfConnection)
 	/*
 	if NumOfDownloadConnections == 1{
 		concurrentDownload = false
@@ -93,7 +94,7 @@ func main() {
 	request.Condition.MessageTimeStampIn = trthrest.TimeOptionsGmtUtcEnum
 	request.Condition.DisplaySourceRIC = true
 	request.Condition.ReportDateRangeType = trthrest.ReportDateRangeTypeRangeEnum
-	startdate := time.Date(2017, 8, 1, 0, 0, 0, 0, time.UTC)
+	startdate := time.Date(2017, 7, 1, 0, 0, 0, 0, time.UTC)
 	request.Condition.QueryStartDate = &startdate
 	enddate := time.Date(2017, 8, 23, 0, 0, 0, 0, time.UTC)
 	request.Condition.QueryEndDate = &enddate
@@ -200,6 +201,11 @@ func main() {
 			Password: dssPassword,
 		},
 	})
+
+	step++
+	log.Printf("Step %d: RequestToken\n", step)
+	
+
 	resp, err := trthrest.HTTPPost(client, trthrest.GetRequestTokenURL(trthURL), bytes.NewBuffer(b), headers, *traceFlag)
 
 	if err != nil {
@@ -229,24 +235,32 @@ func main() {
 	//fmt.Printf("Token: %s\n", respMsg.Value)
 	token := respMsg.Value
 	headers["Authorization"] = "Token " + token
+	
 
 	req1, _ := json.Marshal(struct {
 		ExtractionRequest *trthrest.TickHistoryMarketDepthExtractionRequest
 	}{
 		ExtractionRequest: request,
 	})
-
+	step++
+	log.Printf("Step %d: ExtractRaw for TickHistoryMarketDepthExtractionRequest\n", step)
+	
 	resp, err = trthrest.HTTPPost(client, trthrest.GetExtractRawURL(trthURL), bytes.NewBuffer(req1), headers, *traceFlag)
 	//resp, err = ExtractRaw(client, trthURL, bytes.NewBuffer(req1), headers, *traceFlag)
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	var statusCount = 0
 	for resp.StatusCode == 202 {
 		time.Sleep(3000 * time.Millisecond)
+		statusCount++
 		location := resp.Header.Get("Location")
-		location = strings.Replace(location, "http:", "https:", 1)
+		location = strings.Replace(location, "http:", "https:", 1)	
+		if(statusCount == 1){
+			step++
+		}	
+		log.Printf("Step %d: Checking Status (%d) of Extraction (%d)\n", step, resp.StatusCode, statusCount)
 		resp, err = trthrest.HTTPGet(client, location, headers, *traceFlag)
 	}
 
@@ -271,7 +285,7 @@ func main() {
 	if (*numOfConnection > 1 ){
 	extractionID := GetExtractionIDFromNote(extractRawResult.Notes[0])
 	//extractionID := GetExtractionIDFromNote("Hello World")
-	fmt.Printf("**************\nExtractionID: %q\n**************\n", extractionID)
+	log.Printf("ExtractionID: %q\n", extractionID)
 	if extractionID == "" {
 		log.Println("ExtractionID is nil: Disable Concurrent Download")
 		*numOfConnection = 1
@@ -283,7 +297,8 @@ func main() {
 	//resp, err = ReportExtractionFullFile(client, trthURL, extractionID, headers, *traceFlag)
 	//reportExtractionURL := trthURL + "Extractions/ReportExtractions('" + extractionID + "')/FullFile"
 	if extractionID != ""{
-
+		step++
+		log.Printf("Step %d: Get File information\n", step)
 		resp, err = trthrest.HTTPGet(client, trthrest.GetReportExtractionFullFileURL(trthURL, extractionID), headers, *traceFlag)
 		if err != nil {	
 			log.Fatal(err)
@@ -302,13 +317,16 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		
 		outputFilename = extractedFile.ExtractedFileName
 		fileSize = extractedFile.Size
+		
 	}
 	}else{
 		outputFilename = fmt.Sprintf("output_%s.csv.gz",extractRawResult.JobID )
 		fileSize = 0
 	}
+	log.Printf("File: %s, Size: %d\n",outputFilename, fileSize )
 	//fmt.Println(extractedFile.Metadata)
 	//fmt.Println(extractedFile.ReportExtractionId)
 	//fmt.Println(extractedFile.ExtractedFileId)
@@ -333,6 +351,8 @@ func main() {
 			newHeaders[k] = v
 		}
 		newHeaders["X-Direct-Download"] = "true"
+		step++
+		log.Printf("Step %d: Get AWS URL\n", step)
 		resp, err = trthrest.HTTPGet(client, downloadURL, newHeaders, *traceFlag)
 		//resp, err = RawExtractionResultGetDefaultStream(client, trthURL, extractRawResult.JobID, newHeaders, *traceFlag)
 		if err != nil {
@@ -341,6 +361,7 @@ func main() {
 		if resp.StatusCode == 302 {
 			//GET AWS URL used to download a file and change the URL in downloadURL variable
 			downloadURL = resp.Header.Get("Location")
+			log.Printf("AWS: %s\n", downloadURL)
 			//Clear all headers before sending GET request to AWS. Otherwise, it will return an error
 			for k := range headers {
 				delete(headers, k)
@@ -351,9 +372,13 @@ func main() {
 
 	if *numOfConnection > 1 {
 		//if we get the filename and filesize from Extractions/ReportExtractions, it will use the concurrent download
+		step++
+		log.Printf("Step %d: Concurrent Download: %s, Size: %d, Connection: %d\n", step, outputFilename, fileSize, *numOfConnection)
 		trthrest.ConcurrentDownload(client, headers, downloadURL, outputFilename, *numOfConnection, fileSize, *traceFlag)
 	} else {
 		//if we can't get the filename and filesize from Extractions/ReportExtractions, it will download with one connection
+		step++
+		log.Printf("Step %d: Download: %s\n", step, outputFilename)
 		trthrest.DownloadFile(client, headers, downloadURL, outputFilename, -1, -1, *traceFlag)
 	}
 	elapsed := time.Since(start)
