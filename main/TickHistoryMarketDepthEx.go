@@ -1,219 +1,26 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"github.com/howeyc/gopass"
 	"github.com/jirapongse/trthrest"
 )
 
-//Enter usrname and password here
+//Enter username and password here
 var dssUserName = ""
 var dssPassword = ""
 var trthURL = "https://hosted.datascopeapi.reuters.com/RestApi/v1/"
 
-//HTTPGet : The function that wraps HTTP GET request. It adds the authorization token if token isn't nil
-func HTTPGet(client *http.Client, url string, headers map[string]string, trace bool) (*http.Response, error) {
-	req, _ := http.NewRequest("GET", url, nil)
-	/*
-		req.Header.Add("Content-Type", "application/json")
-		req.Header.Add("Prefer", "respond-async")
-		if token != nil {
-			req.Header.Add("Authorization", "Token "+*token)
 
-	*/
-	for key, value := range headers {
-		//fmt.Printf("%s: %s\n", key, value)
-		req.Header.Add(key, value)
-	}
-
-	if trace == true {
-		dump, _ := httputil.DumpRequestOut(req, true)
-		log.Println(string(dump))
-	}
-
-	resp, err := client.Do(req)
-
-	if trace == true {
-		dumpBody := true
-		contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-		if contentLength > 100 {
-			dumpBody = false
-		}
-
-		dump, _ := httputil.DumpResponse(resp, dumpBody)
-		fmt.Println(string(dump))
-	}
-
-	return resp, err
-
-}
-
-//PrintDownloadPercent : This function shows the download progress
-func PrintDownloadPercent(done chan int64, path string, total int64) {
-
-	var stop = false
-
-	for {
-		select {
-		case <-done:
-			stop = true
-		default:
-
-			file, err := os.Open(path)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			fi, err := file.Stat()
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			size := fi.Size()
-
-			if size == 0 {
-				size = 1
-			}
-
-			var percent float64
-			percent = float64(size) / float64(total) * 100
-
-			log.Printf("%s, Bytes: %d/Total: %d (%.0f%%)", path, size, total, percent)
-
-		}
-
-		if stop {
-			break
-		}
-
-		time.Sleep(time.Second * 1)
-	}
-}
-
-func MergeFile(numberOfParts int, outFileName string) {
-	b := make([]byte, 5000)
-	destFile, _ := os.Create(outFileName)
-	writer := bufio.NewWriter(destFile)
-	for i := 1; i <= numberOfParts; i++ {
-		filename := fmt.Sprintf("part%d", i)
-		srcFile, _ := os.Open(filename)
-		//fmt.Printf("Open File: %s\n", fmt.Sprintf("part%d", i))
-		reader := bufio.NewReader(srcFile)
-		readByte, err := reader.Read(b)
-		//fmt.Printf("Read: %d bytes\n", readByte)
-		for err != io.EOF || readByte > 0 {
-			writer.Write(b[:readByte])
-			//fmt.Printf("Write: %d bytes\n", writeByte)
-			readByte, err = reader.Read(b)
-			//fmt.Printf("Read: %d bytes\n", readByte)
-
-		}
-		srcFile.Close()
-	}
-	writer.Flush()
-	destFile.Close()
-}
-
-func DownloadFile(client *http.Client, headers map[string]string, url string, outFileName string, start int64, stop int64, tracing bool) {
-
-	log.Printf("Download File: %s, %d, %d\n", outFileName, start, stop)
-	var newHeaders map[string]string
-	newHeaders = make(map[string]string)
-	for k, v := range headers {
-		newHeaders[k] = v
-	}
-	if start != -1 {
-		//start == -1 means download full file
-		if stop != -1 {
-			newHeaders["Range"] = fmt.Sprintf("bytes=%d-%d", start, stop)
-
-		} else {
-			newHeaders["Range"] = fmt.Sprintf("bytes=%d-", start)
-		}
-
-	}
-	resp, err := HTTPGet(client, url, newHeaders, tracing)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		body, _ := ioutil.ReadAll(resp.Body)
-		log.Fatalf("Status Code: %s\n%s ", resp.Status, string(body))
-		//log.Fatalf("Status Code: %s\n ", resp.Status)
-	}
-
-	size, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	done := make(chan int64)
-	//outputFileName := "output_" + strconv.Itoa(os.Getpid()) + ".csv.gz"
-
-	out, err := os.Create(outFileName)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go PrintDownloadPercent(done, outFileName, int64(size))
-
-	n, err := io.Copy(out, resp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	done <- n
-	resp.Body.Close()
-	log.Println(outFileName + ": Download Completed!")
-}
-
-func ConcurrentDownload(client *http.Client, headers map[string]string, url string, outFileName string, numOfConn int, fileSize int64,  tracing bool) {
-	var partSize, fileOffset int64
-	partSize = fileSize / int64(numOfConn)
-	fileOffset = 0
-
-	log.Printf("ConcurrentDownload: %s, conn=%d\n", outFileName, numOfConn);
-	var wg sync.WaitGroup
-
-	for i := 1; i <= numOfConn; i++ {
-		wg.Add(1)
-		if i == numOfConn {
-			log.Printf("Part %d: %d- \n", i, fileOffset)
-
-			go func(filename string, start int64, stop int64) {
-				defer wg.Done()
-				DownloadFile(client, headers, url, filename, start, stop, tracing)
-			}(fmt.Sprintf("part%d", i), fileOffset, -1)
-		} else {
-			log.Printf("Part %d: %d - %d\n", i, fileOffset, fileOffset+partSize-1)
-
-			go func(filename string, start int64, stop int64) {
-				defer wg.Done()
-				DownloadFile(client, headers, url, filename, start, stop, tracing)
-			}(fmt.Sprintf("part%d", i), fileOffset, fileOffset+partSize-1)
-			fileOffset = fileOffset + partSize
-		}
-	}
-	wg.Wait()
-	MergeFile(numOfConn, outFileName)
-}
 
 //GetExtractionIDFromNote : Get Extraction ID number from note in the response
 func GetExtractionIDFromNote(note string) string {
@@ -223,54 +30,42 @@ func GetExtractionIDFromNote(note string) string {
 
 }
 
-//HTTPPost : The function that wraps HTTP POST request. It adds the authorization token if token isn't nil
-func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[string]string, trace bool) (*http.Response, error) {
 
-	req, _ := http.NewRequest("POST", url, body)
-
-	/*req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Prefer", "respond-async")
-	if token != nil {
-		req.Header.Add("Authorization", "Token "+*token)
-	*/
-
-	for key, value := range headers {
-		//fmt.Printf("%s: %s\n", key, value)
-		req.Header.Add(key, value)
-	}
-	if trace == true {
-		dump, _ := httputil.DumpRequestOut(req, true)
-		fmt.Println(string(dump))
-	}
-
-	resp, err := client.Do(req)
-
-	if trace == true {
-
-		dumpBody := true
-		contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-		if contentLength > 100 {
-			dumpBody = false
-		}
-
-		dump, _ := httputil.DumpResponse(resp, dumpBody)
-		fmt.Println(string(dump))
-	}
-
-	return resp, err
+/*
+func RequestToken(client *http.Client, trthapiurl string, body *bytes.Buffer, headers map[string]string, trace bool) (*http.Response, error) {
+	return trthrest.HTTPPost(client, trthapiurl+"Authentication/RequestToken", body, headers, trace)	
 }
+
+func ExtractRaw(client *http.Client, trthapiurl string, body *bytes.Buffer, headers map[string]string, trace bool) (*http.Response, error) {
+	return trthrest.HTTPPost(client, trthapiurl+"Extractions/ExtractRaw", body, headers, trace)	
+}
+
+func ReportExtractionFullFile(client *http.Client, trthapiurl string, extractionId string, headers map[string]string, trace bool) (*http.Response, error) {
+	reportExtractionURL := trthapiurl + "Extractions/ReportExtractions('" + extractionId + "')/FullFile"
+	return trthrest.HTTPGet(client, reportExtractionURL, headers, trace)
+}
+func RawExtractionResultGetDefaultStream(client *http.Client, trthapiurl string, jobId string, headers map[string]string, trace bool) (*http.Response, error) {
+	rawExtractionResultURL := trthapiurl + "Extractions/RawExtractionResults('" + jobId + "')" + "/$value"
+	return trthrest.HTTPGet(client, rawExtractionResultURL, headers, trace)
+}
+*/
 func main() {
 
 	//var concurrentDownload = true
-	var NumOfDownloadConnections int
+	//var NumOfDownloadConnections int
 	var headers map[string]string
+	var outputFilename string
+	var fileSize int64
 
 	directDownloadFlag := flag.Bool("aws", false, "Download from AWS (false)")
 	numOfConnection := flag.Int("n", 1, "Number of concurent download channels")
 	traceFlag := flag.Bool("X", false, "Enable HTTP tracing (false)")
+	username := flag.String("u", "", "DSS Username ('')")
+	password := flag.String("p", "", "DSS Password ('')")
 	flag.Parse()
-	NumOfDownloadConnections = *numOfConnection
-	
+//	NumOfDownloadConnections = *numOfConnection
+	dssUserName = *username
+	dssPassword = *password
 
 	if *directDownloadFlag == true {
 		log.Printf("X-Direct-Download Flag: true \n")
@@ -278,7 +73,7 @@ func main() {
 	if *traceFlag == true {
 		log.Printf("tracing Flag: true \n")
 	}
-	log.Printf("Number of concurent download: %d\n", NumOfDownloadConnections)
+	log.Printf("Number of concurent download: %d\n", *numOfConnection)
 	/*
 	if NumOfDownloadConnections == 1{
 		concurrentDownload = false
@@ -405,11 +200,11 @@ func main() {
 			Password: dssPassword,
 		},
 	})
-	resp, err := HTTPPost(client, trthURL+"Authentication/RequestToken", bytes.NewBuffer(b), headers, *traceFlag)
+	resp, err := trthrest.HTTPPost(client, trthrest.GetRequestTokenURL(trthURL), bytes.NewBuffer(b), headers, *traceFlag)
 
 	if err != nil {
 		log.Printf("Error: %s\n", err.Error())
-		panic(err)
+		log.Fatal(err)
 	}
 
 	body, _ := ioutil.ReadAll(resp.Body)
@@ -441,7 +236,8 @@ func main() {
 		ExtractionRequest: request,
 	})
 
-	resp, err = HTTPPost(client, trthURL+"Extractions/ExtractRaw", bytes.NewBuffer(req1), headers, *traceFlag)
+	resp, err = trthrest.HTTPPost(client, trthrest.GetExtractRawURL(trthURL), bytes.NewBuffer(req1), headers, *traceFlag)
+	//resp, err = ExtractRaw(client, trthURL, bytes.NewBuffer(req1), headers, *traceFlag)
 
 	if err != nil {
 		log.Fatal(err)
@@ -451,7 +247,7 @@ func main() {
 		time.Sleep(3000 * time.Millisecond)
 		location := resp.Header.Get("Location")
 		location = strings.Replace(location, "http:", "https:", 1)
-		resp, err = HTTPGet(client, location, headers, *traceFlag)
+		resp, err = trthrest.HTTPGet(client, location, headers, *traceFlag)
 	}
 
 	body, err = ioutil.ReadAll(resp.Body)
@@ -472,34 +268,46 @@ func main() {
 	//fmt.Println(extractRawResult.Notes)
 	//note := extractRawResult.Notes[0]
 	resp.Body.Close()
+	if (*numOfConnection > 1 ){
 	extractionID := GetExtractionIDFromNote(extractRawResult.Notes[0])
 	//extractionID := GetExtractionIDFromNote("Hello World")
 	fmt.Printf("**************\nExtractionID: %q\n**************\n", extractionID)
 	if extractionID == "" {
-		log.Println("ExtractionID is nil: Disable Concorrent Download")
-		NumOfDownloadConnections = 1
+		log.Println("ExtractionID is nil: Disable Concurrent Download")
+		*numOfConnection = 1
+		outputFilename = fmt.Sprintf("output_%s.csv.gz",extractRawResult.JobID )
+		fileSize = 0
 		//concurrentDownload = false
 	}
 
-	reportExtractionURL := trthURL + "Extractions/ReportExtractions('" + extractionID + "')/FullFile"
-	resp, err = HTTPGet(client, reportExtractionURL, headers, *traceFlag)
+	//resp, err = ReportExtractionFullFile(client, trthURL, extractionID, headers, *traceFlag)
+	//reportExtractionURL := trthURL + "Extractions/ReportExtractions('" + extractionID + "')/FullFile"
+	if extractionID != ""{
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	body, err = ioutil.ReadAll(resp.Body)
+		resp, err = trthrest.HTTPGet(client, trthrest.GetReportExtractionFullFileURL(trthURL, extractionID), headers, *traceFlag)
+		if err != nil {	
+			log.Fatal(err)
+		}
+		body, err = ioutil.ReadAll(resp.Body)
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	if resp.StatusCode != 200 {
+		if err != nil {
+			log.Fatal(err)
+		}
+		if resp.StatusCode != 200 {
 
-		log.Fatalf("Status Code: %s\n%s ", resp.Status, string(body))
+			log.Fatalf("Status Code: %s\n%s ", resp.Status, string(body))
+		}
+		extractedFile := &trthrest.ExtractedFile{}
+		err = json.Unmarshal(body, extractedFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		outputFilename = extractedFile.ExtractedFileName
+		fileSize = extractedFile.Size
 	}
-	extractedFile := &trthrest.ExtractedFile{}
-	err = json.Unmarshal(body, extractedFile)
-	if err != nil {
-		log.Fatal(err)
+	}else{
+		outputFilename = fmt.Sprintf("output_%s.csv.gz",extractRawResult.JobID )
+		fileSize = 0
 	}
 	//fmt.Println(extractedFile.Metadata)
 	//fmt.Println(extractedFile.ReportExtractionId)
@@ -514,7 +322,7 @@ func main() {
 	//extractionIDReg := regexp.MustCompile("Extraction ID: ([0-9]+)")
 	//IDReg := regexp.MustCompile("[0-9]+")
 	//fmt.Printf("**************\n%q\n**************\n", IDReg.FindString(extractionIDReg.FindString(note)))
-	downloadURL := trthURL + "Extractions/RawExtractionResults('" + extractRawResult.JobID + "')" + "/$value"
+	downloadURL := trthrest.GetRawExtractionResultGetDefaultStreamURL(trthURL, extractRawResult.JobID)
 	//jobIDURL := trthURL + "StandardExtractions/UserPackageDeliveries('0x05d4d06c151b2f86')/$value"
 	start := time.Now()
 	if *directDownloadFlag == true {
@@ -525,7 +333,8 @@ func main() {
 			newHeaders[k] = v
 		}
 		newHeaders["X-Direct-Download"] = "true"
-		resp, err = HTTPGet(client, downloadURL, newHeaders, *traceFlag)
+		resp, err = trthrest.HTTPGet(client, downloadURL, newHeaders, *traceFlag)
+		//resp, err = RawExtractionResultGetDefaultStream(client, trthURL, extractRawResult.JobID, newHeaders, *traceFlag)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -540,12 +349,12 @@ func main() {
 
 	}
 
-	if NumOfDownloadConnections > 1 {
+	if *numOfConnection > 1 {
 		//if we get the filename and filesize from Extractions/ReportExtractions, it will use the concurrent download
-		ConcurrentDownload(client, headers, downloadURL, extractedFile.ExtractedFileName, NumOfDownloadConnections, extractedFile.Size, *traceFlag)
+		trthrest.ConcurrentDownload(client, headers, downloadURL, outputFilename, *numOfConnection, fileSize, *traceFlag)
 	} else {
 		//if we can't get the filename and filesize from Extractions/ReportExtractions, it will download with one connection
-		DownloadFile(client, headers, downloadURL, extractedFile.ExtractedFileName, -1, -1, *traceFlag)
+		trthrest.DownloadFile(client, headers, downloadURL, outputFilename, -1, -1, *traceFlag)
 	}
 	elapsed := time.Since(start)
 	log.Printf("Download Time: %s\n", elapsed)
