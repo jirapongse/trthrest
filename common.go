@@ -30,11 +30,16 @@ type TickHistoryMarketDepthCondition struct {
 	//QueryStartDate is defined as pointer because it is optional
 	QueryStartDate *time.Time `json:",omitempty"`
 	//QueryEndDate is defined as pointer because it is optional
-	QueryEndDate     *time.Time `json:",omitempty"`
-	DaysAgo          int32      `json:",omitempty"`
-	Preview          PreviewMode
-	ExtractBy        TickHistoryExtractByMode
-	DisplaySourceRIC bool
+	QueryEndDate         *time.Time `json:",omitempty"`
+	DaysAgo              int32      `json:",omitempty"`
+	RelativeStartDaysAgo int32      `json:",omitempty"`
+	RelativeEndDaysAgo   int32      `json:",omitempty"`
+	RelativeStartTime    string     `json:",omitempty"`
+	RelativeEndTime      string     `json:",omitempty"`
+	DateRangeTimeZone    string     `json:",omitempty"`
+	Preview              PreviewMode
+	ExtractBy            TickHistoryExtractByMode
+	DisplaySourceRIC     bool
 }
 
 //InstrumentIdentifierList : defined type for InstrumentIdentifierList used in TickHistoryMarketDepthExtractionRequest. This type will be encoded to Json by Marshaller
@@ -47,8 +52,6 @@ type InstrumentIdentifierList struct {
 	ValidationOptions                      *InstrumentValidationOptions `json:",omitempty"`
 	UseUserPreferencesForValidationOptions bool                         `json:",omitempty"`
 }
-
-
 
 //Credential : The type is used Authentication/RequestToken request. It will be encoded to JSON by Marshaller
 type Credential struct {

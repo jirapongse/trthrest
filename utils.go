@@ -1,18 +1,20 @@
 package trthrest
-import(
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httputil"
-	"log"
-	"strconv"
-	"fmt"
-	"io/ioutil"
 	"os"
-	"io"
-	"bytes"
+	"strconv"
 	"sync"
 	"time"
-	"bufio"
 )
+
 //HTTPPost : The function that wraps HTTP POST request. It adds the authorization token if token isn't nil
 func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[string]string, trace bool) (*http.Response, error) {
 
@@ -29,7 +31,7 @@ func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[s
 		req.Header.Add(key, value)
 	}
 	if trace == true {
-		dump, _ := httputil.DumpRequest(req, true)		
+		dump, _ := httputil.DumpRequest(req, true)
 		log.Println(string(dump))
 	}
 
@@ -39,7 +41,7 @@ func HTTPPost(client *http.Client, url string, body *bytes.Buffer, headers map[s
 
 		dumpBody := true
 		contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-		if contentLength > 1000 {
+		if contentLength > 5000 {
 			dumpBody = false
 		}
 
@@ -72,10 +74,10 @@ func HTTPGet(client *http.Client, url string, headers map[string]string, trace b
 
 	resp, err := client.Do(req)
 
-	if trace == true && err == nil{
+	if trace == true && err == nil {
 		dumpBody := true
 		contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-		if contentLength > 1000 {
+		if contentLength > 5000 {
 			dumpBody = false
 		}
 
@@ -87,7 +89,7 @@ func HTTPGet(client *http.Client, url string, headers map[string]string, trace b
 
 }
 
-//DownloadFile: Download the file by offset. 
+//DownloadFile: Download the file by offset.
 //if start == -1 means download full file
 //if stop == -1 means download from start to the end of file
 func DownloadFile(client *http.Client, headers map[string]string, url string, outFileName string, start int64, stop int64, tracing bool) {
@@ -142,17 +144,17 @@ func DownloadFile(client *http.Client, headers map[string]string, url string, ou
 	}
 	done <- n
 	resp.Body.Close()
-	
+
 }
 
 //ConcurrentDownload: This function is used to download a file concurrently by the specified by the numOfConn
 //Filesize of the file is required
-func ConcurrentDownload(client *http.Client, headers map[string]string, url string, outFileName string, numOfConn int, fileSize int64,  tracing bool) {
+func ConcurrentDownload(client *http.Client, headers map[string]string, url string, outFileName string, numOfConn int, fileSize int64, tracing bool) {
 	var partSize, fileOffset int64
 	partSize = fileSize / int64(numOfConn)
 	fileOffset = 0
 
-	log.Printf("ConcurrentDownload: %s, conn=%d\n", outFileName, numOfConn);
+	log.Printf("ConcurrentDownload: %s, conn=%d\n", outFileName, numOfConn)
 	var wg sync.WaitGroup
 
 	for i := 1; i <= numOfConn; i++ {
@@ -177,6 +179,7 @@ func ConcurrentDownload(client *http.Client, headers map[string]string, url stri
 	wg.Wait()
 	MergeFile(numOfConn, outFileName)
 }
+
 //PrintDownloadPercent : This function shows the download progress
 func PrintDownloadPercent(done chan int64, path string, total int64) {
 
@@ -185,10 +188,7 @@ func PrintDownloadPercent(done chan int64, path string, total int64) {
 	var maxRate, count, currentRate int
 
 	var logInterval = 5
-	previousSize, maxRate, count, currentRate = 0,0,0,0
-	
-
-	
+	previousSize, maxRate, count, currentRate = 0, 0, 0, 0
 
 	for {
 		select {
@@ -207,34 +207,30 @@ func PrintDownloadPercent(done chan int64, path string, total int64) {
 			}
 
 			size := fi.Size()
-			
+
 			if size == 0 {
 				size = 1
 			}
-			
-			currentRate =  int(size - previousSize)
-			if(currentRate > maxRate){
-				maxRate=currentRate
+
+			currentRate = int(size - previousSize)
+			if currentRate > maxRate {
+				maxRate = currentRate
 			}
-
-		
-
-		
 
 			var percent float64
 			percent = float64(size) / float64(total) * 100
 
-			if count % logInterval == 0{
+			if count%logInterval == 0 {
 				log.Printf("%s, Bytes: %d/Total: %d (%.0f%%)", path, size, total, percent)
 			}
-			
+
 			previousSize = size
 
 		}
 
 		if stop {
-			totalMB := total/1024
-			log.Printf("%s: Download Completed, Speed: Avg %.2f KBs, Max %.2f KBs", path, float32(totalMB)/float32(count), float32(maxRate)/float32(1024))
+			totalMB := total / 1024
+			log.Printf("%s: Download Completed, Speed: Avg %.2f KB/s, Max %.2f KB/s", path, float32(totalMB)/float32(count), float32(maxRate)/float32(1024))
 			break
 		}
 
