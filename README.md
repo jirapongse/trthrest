@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Thomson Reuters Tick History (TRTH) is an Internet-hosted product on the DataScope Select platform that provides SOAP-based and a REST API for unparalleled access to historical high frequency data across global asset classes dating to 1996. However a legacy SOAP-based API is also available, and is scheduled to be sunset. Therefore client who still uses SOAP-based API may need to upgrade their application to use REST API instead.
+Thomson Reuters Tick History (TRTH) is an Internet-hosted product on the DataScope Select platform that provides SOAP-based API and a REST API for unparalleled access to historical high frequency data across global asset classes dating to 1996. However a legacy SOAP-based API is also available, and is scheduled to be sunset. Therefore client who still uses SOAP-based API may need to upgrade their application to use REST API instead.
 
 This article demonstrates problems and solutions that developers should aware when using TRTH V2 On Demand data extraction with Go programming language. It uses Tick History Market Depth On Demand data extraction as an example to demonstrate the usage and solutions. However, the methods mentioned in this article can be applied to other types of data extractions and programming languages.
 
