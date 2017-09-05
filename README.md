@@ -212,7 +212,7 @@ The above code is from the example which shows how to use **TickHistoryMarketDep
     }
 }
 ```
-The JSON object shows that the **Metdata** field in **TickHistoryMarketDepthExtractionRequest** type is encoded as a **@odata.type** field with the value specified in the **odata** tag.
+The JSON object shows that the **Metadata** field in **TickHistoryMarketDepthExtractionRequest** type is encoded as a **@odata.type** field with the value specified in the **odata** tag.
 
 ```
 "@odata.type":"#ThomsonReuters.Dss.Api.Extractions.ExtractionRequests.TickHistoryMarketDepthExtractionRequest",
